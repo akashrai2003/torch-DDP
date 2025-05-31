@@ -9,19 +9,18 @@ from torch.utils.data import DataLoader, DistributedSampler
 from transformers import (
     BertForSequenceClassification,
     BertTokenizer,
-    AdamW,
     get_linear_schedule_with_warmup,
     DataCollatorWithPadding,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
-    load_dataset
+    AutoTokenizer
 )
+from datasets import load_dataset
+from torch.optim import AdamW
 import socket
 import time
 from datetime import timedelta
 import json
 from pathlib import Path
-from datasets import load_dataset
 
 def setup():
     backend = "nccl" if torch.cuda.is_available() else "gloo"
@@ -120,14 +119,15 @@ def main():
                 examples["sentence"],
                 padding=False,
                 truncation=True,
-                max_length=128
+                max_length=128,
+                return_tensors=None  # Ensure we don't get batched tensors
             )
 
         # Tokenize datasets
         tokenized_datasets = dataset.map(
             tokenize_function,
             batched=True,
-            remove_columns=dataset["train"].column_names
+            remove_columns=['idx', 'sentence']  # Keep the label column
         )
 
         data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -167,7 +167,7 @@ def main():
         )
 
         # Training setup
-        num_epochs = 3
+        num_epochs = 2
         num_training_steps = num_epochs * len(train_loader)
         num_warmup_steps = num_training_steps // 10
 
@@ -210,9 +210,13 @@ def main():
                     optimizer.zero_grad()
                     outputs = model(**batch)
                     loss = outputs.loss
-                    loss.backward()
-                    optimizer.step()
-                    scheduler.step()
+                    if loss is not None:  # Make sure we have a valid loss
+                        loss.backward()
+                        optimizer.step()
+                        scheduler.step()
+                    else:
+                        print(f"[Rank {rank}] Warning: Got None loss for batch {batch_idx}")
+                        continue
                     
                     # Calculate accuracy
                     predictions = outputs.logits.argmax(-1)
