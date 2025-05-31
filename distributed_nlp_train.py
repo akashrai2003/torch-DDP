@@ -113,6 +113,8 @@ def main():
             print("Loading SST-2 dataset...")
         
         dataset = load_dataset("glue", "sst2")
+        # Take a smaller subset of the data for quick testing - 3200 examples total
+        dataset = dataset.filter(lambda x, idx: idx < 3200, with_indices=True)
         
         def tokenize_function(examples):
             return tokenizer(
